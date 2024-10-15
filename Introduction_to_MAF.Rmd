@@ -1,4 +1,5 @@
 ---
+Names: Sophie Shen, Robert Logan
 title: "Introduction to MAF"
 author: Mahija Mogalipuvvu, adapted from Nicole Black, Wade Boohar
 date: 10/10/24
