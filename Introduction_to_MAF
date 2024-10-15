@@ -1,0 +1,153 @@
+---
+title: "Introduction to MAF"
+author: Mahija Mogalipuvvu, adapted from Nicole Black, Wade Boohar
+date: 10/10/24
+---
+
+***Deliverables***
+- upload this R Notebook to your GitHub and submit the link to your Repo on Brightspace
+- include ALL graphs or figures created in this assignment in a folder with your R notebook with descriptive file names.
+
+We encourage you to work with a partner. Therefore, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In this assignment, you will need to use your skills learned in class to demonstrate your understanding of categorical variables and R data structures.
+
+*Pre-Assignment*
+Load all necessary packages, read in the clinical data.csv file you have in your analysis_data folder, and instantiate the MAF_object.
+```{r}
+  knitr::opts_knit$set(root.dir = normalizePath("~/490_cluster/analysis_data")) 
+
+library(maftools)
+library(TCGAbiolinks)
+library(ggplot2)
+
+clinical <- read.csv("~/490_cluster/analysis_data/GDCdata/TCGA-BRCA/Clinical/Clinical_Supplement.csv")
+
+maf_query <- GDCquery(
+  project = 'TCGA-BRCA',
+  data.category = "Simple Nucleotide Variation",
+  access = "open", # we only have access to somatic mutations which are open access
+  data.type = "Masked Somatic Mutation",
+  workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+
+#GDCdownload(maf_query)
+
+maf <- GDCprepare(maf_query) # as long as it runs, ignore any errors
+
+maf_object <- read.maf(maf = maf,
+                       clinicalData = clinical, 
+                       isTCGA = TRUE)
+
+```
+
+
+*1*
+Choose a clinical variable (or any variable from clin_rad or clin_drug) to separate your populations into two different groups and rewrite the column or create a new column with that variable as a factor. ***Do not use age or vital_status as your clinical variable.*** Hint: if your variable is continuous, you will need to determine your own cutoffs for the different levels of the factor. If your variable is categorical and has more than two possible values, choose the two that are the most common.
+```{r}
+maf_object@clinical.data$menopause_status <- factor(maf_object@clinical.data$menopause_status)
+```
+
+
+*2*
+Create a co-oncoplot with the top 10-20 (you choose) most mutated genes for the two groups. Pick one that has a large discrepancy in % mutated or type of mutations between the groups and research it. 
+Research it. What is the gene used for? Can you think of any reason for the discrepancy?
+
+Answer: There is a large discrepancy in % mutated for the TTN gene between patients who are pre and post menopausal. The TTN gene is responsible for producing titin, the largest protein in the human body. The discrepancy in TTN mutation rates between pre and post menopausal patients could be related to age-related changes in muscle and tissues, since menopause marks significant hormonal shifts that might influence tissue stress and mutation accumulation over time.
+
+```{r}
+pre_mask <- ifelse(maf_object@clinical.data$menopause_status == "Pre (<6 months since LMP AND no prior bilateral ovariectomy AND not on estrogen replacement)", T, F)
+pre_patient_barcodes <- maf_object@clinical.data$Tumor_Sample_Barcode[pre_mask]
+pre_maf <- subsetMaf(maf = maf_object,
+                        tsb = pre_patient_barcodes)
+
+post_mask <- ifelse(maf_object@clinical.data$menopause_status == "Post (prior bilateral ovariectomy OR >12 mo since LMP with no prior hysterectomy)", T, F)
+post_patient_barcodes <- maf_object@clinical.data$Tumor_Sample_Barcode[post_mask]
+post_maf <- subsetMaf(maf = maf_object,
+                      tsb = post_patient_barcodes)
+```
+
+```{r}
+oncoplot(maf = maf_object,
+         top = 10,
+         clinicalFeatures = "menopause_status",
+         borderCol = NA)
+```
+
+```{r}
+coOncoplot(m1 = pre_maf, 
+           m2 = post_maf, 
+           m1Name = "Pre Menopause", 
+           m2Name = "Post Menopause", 
+           borderCol = NA)
+```
+
+
+*3*
+Create a contingency table with your variable and chosen gene. Run a Fisher’s Exact Test between presence of mutations for that gene and your clinical variable. Create and save a mosaic plot. 
+Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and p-value.
+
+Answer:The very low p-value suggests a statistically significant difference in TTN mutation rates between post- and pre-menopausal patients. Post-menopausal patients have significantly higher odds (2.562071 times more likely) of having TTN mutations compared to pre-menopausal patients.
+
+```{r}
+maf_object@clinical.data$menopause_status <- factor(maf_object@clinical.data$menopause_status)
+
+gene_mask <- ifelse(maf_object@data$Hugo_Symbol == "TTN", T, F)
+maf_object_mask <- maf_object@data[gene_mask,]$Tumor_Sample_Barcode
+
+maf_object_mask2 <- levels(factor(maf_object_mask))
+mutations <- match(maf_object@clinical.data$Tumor_Sample_Barcode, maf_object_mask2)
+
+maf_object@clinical.data$gene_mutated <- ifelse(!is.na(mutations), 'mutated', 'not mutated')
+
+maf_object@clinical.data$menopause_status_renamed <- ifelse(maf_object@clinical.data$menopause_status == "Pre (<6 months since LMP AND no prior bilateral ovariectomy AND not on estrogen replacement)", 'Pre', ifelse(maf_object@clinical.data$menopause_status == "Post (prior bilateral ovariectomy OR >12 mo since LMP with no prior hysterectomy)", 'Post', NA))
+
+contig <- table(maf_object@clinical.data$gene_mutated, maf_object@clinical.data$menopause_status_renamed)
+contig
+
+mosaicplot(contig)
+
+fisher_test <- fisher.test(contig)
+fisher_test
+fisher_test$p.value
+```
+
+```{r}
+maf_object@data
+```
+
+
+*4*
+Subset your maf_object based on your chosen clinical variable and create a co-lollipop plot of your chosen gene divided between the two different clinical variable possibilities. Include descriptive names on your plot.
+Do you notice any difference in terms of mutations (e.g. sites, types, number) between the two populations?
+
+Answer: For both pre and post menopausal patients, the majority of TTN mutations are missense mutations. 
+
+```{r}
+lollipopPlot2(m1 = pre_maf, 
+              m2 = post_maf, 
+              m1_name = "Pre",
+              m2_name = "Post",
+              gene = 'TTN')
+```
+
+
+*5*
+Create your Overall_Survival_Status column and create a mafSurvival KM plot based on mutations in your chosen gene.
+Does there seem to be a difference? Hypothesize why or not based on the other analysis you did with the gene above.
+
+Answer: The KM plot shows that generally patients with TTN mutation have a lower survival probabilty than other patients. This difference in survival probability may be because TTN is critical for muscle structure. For instance, mutations might compromise heart function, leading to worse survival outcomes
+
+```{r}
+maf_object@clinical.data$survival_time <- ifelse(maf_object@clinical.data$vital_status == "Dead", maf_object@clinical.data$death_days_to, maf_object@clinical.data$last_contact_days_to)
+
+maf_object@clinical.data$death_event <- maf_object@clinical.data$vital_status == "Dead"
+
+mafSurvival(maf = maf_object,
+            genes = "TTN", ## pick a gene of your choosing
+            time = "survival_time", ## name of the column in maf_object@clinical.data containing survival time
+            Status = "death_event", ## name of the column that contains a boolean value for death events, you may need to recreate this... 
+            isTCGA = TRUE)
+```
